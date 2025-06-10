@@ -219,9 +219,6 @@ jobs:
           - file: .github/Dockerfile-crux-mir
             image: ghcr.io/galoisinc/crux-mir
             cache: ghcr.io/galoisinc/cache-crux-mir
-        platform:
-          - linux/amd64
-          - linux/arm64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -272,9 +269,6 @@ jobs:
           labels: ${{ steps.labels.outputs.labels }}
           tags: ${{ matrix.image }}:${{ steps.common-tag.outputs.common-tag }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
-          #context: .
-          #load: true
-          #push: false
           file: ${{ matrix.file }}
           build-args: ${{ matrix.build-args }}
           cache-from: |
@@ -299,26 +293,11 @@ jobs:
       - name: Upload digest
         uses: actions/upload-artifact@v4
         with:
-          name: digests-${{ env.PLATFORM_PAIR }}
+          name: digests-${{ runner.arch }}
           path: ${{ runner.temp }}/digests/*
           if-no-files-found: error
           retention-days: 1
 
-      # - if: needs.config.outputs.event-schedule == 'true'
-      #   name: ${{ matrix.image }}:nightly-experimental
-      #   run: |
-      #     docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:nightly-experimental
-      #     docker push ${{ matrix.image }}:nightly-experimental
-
-      # - if: needs.config.outputs.release == 'true'
-      #   name: ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
-      #   run: |
-      #     docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
-      #     docker push ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
-      #     docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:latest
-      #     docker push ${{ matrix.image }}:latest
-
-  # TODO: configure the image tag for release/event-schedule
   merge-push-image:
     runs-on: ubuntu-latest
     needs:
