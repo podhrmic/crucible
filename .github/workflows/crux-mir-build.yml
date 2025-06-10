@@ -210,11 +210,12 @@ jobs:
           name: crux-mir-${{ matrix.os }}-${{ matrix.ghc }}
 
   build-image:
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.runner }}
     needs: [config]
     strategy:
       fail-fast: false
       matrix:
+        runner: [ ubuntu-24.04, ubuntu-24.04-arm ]
         include:
           - file: .github/Dockerfile-crux-mir
             image: ghcr.io/galoisinc/crux-mir
@@ -235,11 +236,6 @@ jobs:
           sudo rm -rf /opt/ghc
           sudo rm -rf "/usr/local/share/boost"
           sudo rm -rf "$AGENT_TOOLSDIRECTORY" # Python installations
-
-      - name: Prepare
-        run: |
-          platform=${{ matrix.platform }}
-          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - uses: rlespinasse/github-slug-action@v3.x
 
@@ -265,7 +261,7 @@ jobs:
       - uses: docker/build-push-action@v6
         id: build
         with:
-          platforms: ${{ matrix.platform }}
+          platforms: ${{ runner.arch }}
           labels: ${{ steps.labels.outputs.labels }}
           tags: ${{ matrix.image }}:${{ steps.common-tag.outputs.common-tag }}
           outputs: type=image,push-by-digest=true,name-canonical=true,push=true
