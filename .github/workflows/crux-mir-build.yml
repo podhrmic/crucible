@@ -214,7 +214,7 @@ jobs:
           path: crux-mir-*.tar.gz*
           name: crux-mir-${{ matrix.os }}-${{ matrix.ghc }}
 
-  build-push-image:
+  build-image:
     runs-on: ubuntu-24.04
     needs: [config]
     if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || needs.config.outputs.release == 'true') && github.repository_owner == 'GaloisInc'
@@ -225,6 +225,9 @@ jobs:
           - file: .github/Dockerfile-crux-mir
             image: ghcr.io/galoisinc/crux-mir
             cache: ghcr.io/galoisinc/cache-crux-mir
+        platform:
+          - linux/amd64
+          - linux/arm64
     steps:
       - uses: actions/checkout@v4
         with:
@@ -241,6 +244,11 @@ jobs:
           sudo rm -rf /opt/ghc
           sudo rm -rf "/usr/local/share/boost"
           sudo rm -rf "$AGENT_TOOLSDIRECTORY" # Python installations
+
+      - name: Prepare
+        run: |
+          platform=${{ matrix.platform }}
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
 
       - uses: rlespinasse/github-slug-action@v3.x
 
@@ -263,13 +271,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/build-push-action@v2
+      - uses: docker/build-push-action@v6
+        id: build
         with:
-          context: .
-          tags: ${{ matrix.image }}:${{ steps.common-tag.outputs.common-tag }}
+          platforms: ${{ matrix.platform }}
           labels: ${{ steps.labels.outputs.labels }}
-          load: true
-          push: false
+          tags: ${{ matrix.image }}:${{ steps.common-tag.outputs.common-tag }}
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          #context: .
+          #load: true
+          #push: false
           file: ${{ matrix.file }}
           build-args: ${{ matrix.build-args }}
           cache-from: |
@@ -285,16 +296,75 @@ jobs:
           build-args: ${{ matrix.build-args }}
           cache-to: type=registry,ref=${{ matrix.cache }}:${{ steps.common-tag.outputs.common-tag }},mode=max
 
-      - if: needs.config.outputs.event-schedule == 'true'
-        name: ${{ matrix.image }}:nightly
+      - name: Export digest
         run: |
-          docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:nightly
-          docker push ${{ matrix.image }}:nightly
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}"
 
-      - if: needs.config.outputs.release == 'true'
-        name: ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ env.PLATFORM_PAIR }}
+          path: ${{ runner.temp }}/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+      # - if: needs.config.outputs.event-schedule == 'true'
+      #   name: ${{ matrix.image }}:nightly
+      #   run: |
+      #     docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:nightly
+      #     docker push ${{ matrix.image }}:nightly
+
+      # - if: needs.config.outputs.release == 'true'
+      #   name: ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
+      #   run: |
+      #     docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
+      #     docker push ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
+      #     docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:latest
+      #     docker push ${{ matrix.image }}:latest
+
+  # TODO: configure the image tag for release/event-schedule
+  merge-push-image:
+    runs-on: ubuntu-latest
+    needs:
+      - build-image
+    env:
+      Image: ghcr.io/galoisinc/crux-mir
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: ${{ runner.temp }}/digests
+          pattern: digests-*
+          merge-multiple: true
+
+      - uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: $Image
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Create manifest list and push
+        working-directory: ${{ runner.temp }}/digests
         run: |
-          docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
-          docker push ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
-          docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:latest
-          docker push ${{ matrix.image }}:latest
+          docker buildx imagetools create $(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON") \
+            $(printf '$Image@sha256:%s ' *)
+
+      - name: Inspect image
+        run: |
+          docker buildx imagetools inspect $Image:${{ steps.meta.outputs.version }}
