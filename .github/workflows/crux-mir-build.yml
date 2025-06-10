@@ -305,10 +305,10 @@ jobs:
           retention-days: 1
 
       # - if: needs.config.outputs.event-schedule == 'true'
-      #   name: ${{ matrix.image }}:nightly
+      #   name: ${{ matrix.image }}:nightly-experimental
       #   run: |
-      #     docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:nightly
-      #     docker push ${{ matrix.image }}:nightly
+      #     docker tag ${{ matrix.image }}:$COMMON_TAG ${{ matrix.image }}:nightly-experimental
+      #     docker push ${{ matrix.image }}:nightly-experimental
 
       # - if: needs.config.outputs.release == 'true'
       #   name: ${{ matrix.image }}:${{ needs.config.outputs.crux-mir-version }}
